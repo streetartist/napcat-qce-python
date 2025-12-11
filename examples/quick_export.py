@@ -29,6 +29,9 @@ EXPORT_DAYS = 7
 # 导出格式: "HTML", "JSON", "TXT", "EXCEL"
 EXPORT_FORMAT = "HTML"
 
+# 导出目录（None 使用默认目录）
+OUTPUT_DIR = "D:/QQ聊天记录"
+
 
 # ============================================================================
 # 主程序
@@ -54,6 +57,8 @@ def main():
     info = client.system.get_info()
     print(f"已登录: {info.self_nick} ({info.self_uin})")
     print(f"时间范围: 最近 {EXPORT_DAYS} 天 | 格式: {EXPORT_FORMAT}")
+    if OUTPUT_DIR:
+        print(f"输出目录: {OUTPUT_DIR}")
     print()
 
     # 构建导出目标列表
@@ -68,6 +73,7 @@ def main():
         targets=targets,
         format=EXPORT_FORMAT,
         days=EXPORT_DAYS,
+        output_dir=OUTPUT_DIR,
         on_progress=lambda id, task: print(f"  {task.session_name}: {task.message_count} 条消息"),
         on_error=lambda id, e: print(f"  {id}: 失败 - {e}"),
     )

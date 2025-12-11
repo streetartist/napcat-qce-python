@@ -1045,6 +1045,7 @@ class NapCatQCE:
         targets: List[Dict[str, Any]],
         format: str = "HTML",
         days: Optional[int] = None,
+        output_dir: Optional[str] = None,
         on_progress: Optional[Callable[[str, ExportTask], None]] = None,
         on_error: Optional[Callable[[str, Exception], None]] = None,
     ) -> Dict[str, Any]:
@@ -1058,6 +1059,7 @@ class NapCatQCE:
                 - name: 可选，会话名称
             format: 导出格式
             days: 导出最近N天
+            output_dir: 输出目录（导出完成后移动文件到此目录）
             on_progress: 进度回调 (target_id, task)
             on_error: 错误回调 (target_id, exception)
 
@@ -1068,9 +1070,16 @@ class NapCatQCE:
             results = client.batch_export([
                 {"type": "group", "id": "123456789"},
                 {"type": "friend", "id": "111222333"},
-            ], days=7)
+            ], days=7, output_dir="D:/QQ聊天记录")
             print(f"成功: {results['success']}, 失败: {results['failed']}")
         """
+        import os
+        import shutil
+
+        # 确保输出目录存在
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
         results = {
             "success": 0,
             "failed": 0,
@@ -1099,6 +1108,15 @@ class NapCatQCE:
                         session_name=target_name,
                     )
 
+                # 移动文件到输出目录
+                output_path = None
+                if output_dir and task.file_name:
+                    user_profile = os.environ.get("USERPROFILE", os.path.expanduser("~"))
+                    src_path = os.path.join(user_profile, ".qq-chat-exporter", "exports", task.file_name)
+                    if os.path.exists(src_path):
+                        output_path = os.path.join(output_dir, task.file_name)
+                        shutil.move(src_path, output_path)
+
                 if on_progress:
                     on_progress(target_id, task)
 
@@ -1110,6 +1128,7 @@ class NapCatQCE:
                     "status": "success",
                     "message_count": task.message_count,
                     "file_name": task.file_name,
+                    "output_path": output_path,
                 })
 
             except Exception as e:

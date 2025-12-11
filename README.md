@@ -63,16 +63,9 @@ print(f"已登录: {info.self_nick} ({info.self_uin})")
 groups = client.groups.get_all()
 print(f"共有 {len(groups)} 个群组")
 
-# 导出聊天记录
-task = client.messages.export(
-    chat_type=2,  # 群聊
-    peer_uid=groups[0].group_code,
-    format="HTML",
-)
-
-# 等待完成
-result = client.tasks.wait_for_completion(task.id)
-print(f"导出完成: {result.message_count} 条消息")
+# 导出聊天记录（一行搞定！）
+task = client.export_group(groups[0].group_code, days=7)
+print(f"导出完成: {task.message_count} 条消息")
 ```
 
 ---
@@ -276,51 +269,61 @@ manager.reset_export_config()
 
 ## 批量导出
 
-### 导出指定列表
+### 便捷方法（推荐）
 
 ```python
-from napcat_qce import connect, ChatType, MessageFilter
-from datetime import datetime, timedelta
+from napcat_qce import connect
 
 client = connect()
 
-# 要导出的目标
-GROUP_IDS = ["123456789", "987654321"]
-FRIEND_IDS = ["111222333"]
+# 导出单个群聊（最近7天）
+task = client.export_group("123456789", days=7)
+print(f"导出了 {task.message_count} 条消息")
 
-# 时间范围：最近7天
-end_time = datetime.now()
-start_time = end_time - timedelta(days=7)
+# 导出单个私聊
+task = client.export_friend("111222333", days=30)
 
-filter = MessageFilter(
-    start_time=int(start_time.timestamp() * 1000),
-    end_time=int(end_time.timestamp() * 1000),
+# 批量导出多个目标
+results = client.batch_export(
+    targets=[
+        {"type": "group", "id": "123456789"},
+        {"type": "group", "id": "987654321"},
+        {"type": "friend", "id": "111222333"},
+    ],
+    days=7,
+    format="HTML",
+    output_dir="D:/QQ聊天记录",  # 可选，指定输出目录
+    on_progress=lambda id, task: print(f"  {task.session_name}: {task.message_count} 条"),
+    on_error=lambda id, e: print(f"  {id}: 失败 - {e}"),
 )
 
-# 导出群聊
-for group_id in GROUP_IDS:
-    task = client.messages.export(
-        chat_type=ChatType.GROUP.value,
-        peer_uid=group_id,
-        format="HTML",
-        filter=filter,
-    )
-    result = client.tasks.wait_for_completion(task.id)
-    print(f"群 {group_id}: {result.message_count} 条消息")
-
-# 导出私聊
-for friend_id in FRIEND_IDS:
-    task = client.messages.export(
-        chat_type=ChatType.PRIVATE.value,
-        peer_uid=friend_id,
-        format="HTML",
-        filter=filter,
-    )
-    result = client.tasks.wait_for_completion(task.id)
-    print(f"好友 {friend_id}: {result.message_count} 条消息")
+print(f"成功: {results['success']}, 失败: {results['failed']}")
+print(f"消息总数: {results['total_messages']} 条")
 ```
 
-### 使用批量导出工具
+### 使用时间筛选器
+
+```python
+from napcat_qce import MessageFilter
+
+# 最近7天
+filter = MessageFilter.last_days(7)
+
+# 最近24小时
+filter = MessageFilter.last_hours(24)
+
+# 自定义时间范围
+from datetime import datetime
+filter = MessageFilter(
+    start_time=datetime(2024, 1, 1),
+    end_time=datetime(2024, 12, 31),
+)
+
+# 使用筛选器导出
+task = client.export_group("123456789", filter=filter)
+```
+
+### 更多示例
 
 参见 `examples/batch_export.py` 和 `examples/quick_export.py`。
 
@@ -632,6 +635,22 @@ security = client.system.get_security_status()
 | `sticker_packs` | `StickerPacksAPI` | 表情包管理 |
 | `export_files` | `ExportFilesAPI` | 导出文件管理 |
 | `system` | `SystemAPI` | 系统信息 |
+
+### 便捷导出方法（NapCatQCE 客户端）
+
+| 方法 | 描述 |
+|------|------|
+| `export_group(group_id, days=7)` | 快速导出群聊记录 |
+| `export_friend(friend_id, days=7)` | 快速导出私聊记录 |
+| `batch_export(targets, days=7)` | 批量导出多个目标 |
+| `messages.quick_export(...)` | 创建导出任务并等待完成 |
+
+### MessageFilter 便捷方法
+
+| 方法 | 描述 |
+|------|------|
+| `MessageFilter.last_days(n)` | 创建最近N天的筛选器 |
+| `MessageFilter.last_hours(n)` | 创建最近N小时的筛选器 |
 
 ### 便捷函数
 
