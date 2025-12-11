@@ -201,9 +201,21 @@ class UsersAPI(BaseAPI):
 class MessagesAPI(BaseAPI):
     """消息 API"""
 
+    def _normalize_chat_type(self, chat_type) -> int:
+        """将 ChatType 枚举或整数统一转换为整数"""
+        if isinstance(chat_type, ChatType):
+            return chat_type.value
+        return int(chat_type)
+
+    def _normalize_format(self, format) -> str:
+        """将 ExportFormat 枚举或字符串统一转换为字符串"""
+        if isinstance(format, ExportFormat):
+            return format.value.upper()
+        return str(format).upper()
+
     def fetch(
         self,
-        chat_type: int,
+        chat_type,  # int 或 ChatType
         peer_uid: str,
         filter: Optional[MessageFilter] = None,
         batch_size: int = 5000,
@@ -214,7 +226,7 @@ class MessagesAPI(BaseAPI):
         批量获取消息
 
         Args:
-            chat_type: 聊天类型 (1=私聊, 2=群聊)
+            chat_type: 聊天类型 (ChatType.PRIVATE, ChatType.GROUP 或 1, 2)
             peer_uid: 对方 UID 或群号
             filter: 消息筛选条件
             batch_size: 批量大小
@@ -224,7 +236,7 @@ class MessagesAPI(BaseAPI):
         Returns:
             包含消息列表和分页信息的字典
         """
-        peer = {"chatType": chat_type, "peerUid": peer_uid}
+        peer = {"chatType": self._normalize_chat_type(chat_type), "peerUid": peer_uid}
         body = {
             "peer": peer,
             "batchSize": batch_size,
@@ -250,7 +262,7 @@ class MessagesAPI(BaseAPI):
 
     def fetch_all(
         self,
-        chat_type: int,
+        chat_type,  # int 或 ChatType
         peer_uid: str,
         filter: Optional[MessageFilter] = None,
         batch_size: int = 5000,
@@ -259,7 +271,7 @@ class MessagesAPI(BaseAPI):
         获取所有消息（生成器）
 
         Args:
-            chat_type: 聊天类型
+            chat_type: 聊天类型 (ChatType.PRIVATE, ChatType.GROUP 或 1, 2)
             peer_uid: 对方 UID 或群号
             filter: 消息筛选条件
             batch_size: 批量大小
@@ -287,9 +299,9 @@ class MessagesAPI(BaseAPI):
 
     def export(
         self,
-        chat_type: int,
+        chat_type,  # int 或 ChatType
         peer_uid: str,
-        format: str = "JSON",
+        format = "JSON",  # str 或 ExportFormat
         filter: Optional[MessageFilter] = None,
         options: Optional[ExportOptions] = None,
         session_name: Optional[str] = None,
@@ -298,9 +310,9 @@ class MessagesAPI(BaseAPI):
         创建导出任务
 
         Args:
-            chat_type: 聊天类型 (1=私聊, 2=群聊)
+            chat_type: 聊天类型 (ChatType.PRIVATE, ChatType.GROUP 或 1, 2)
             peer_uid: 对方 UID 或群号
-            format: 导出格式 (TXT, JSON, HTML, EXCEL)
+            format: 导出格式 (ExportFormat.HTML 或 "HTML", "JSON", "TXT", "EXCEL")
             filter: 消息筛选条件
             options: 导出选项
             session_name: 会话名称（可选）
@@ -308,10 +320,10 @@ class MessagesAPI(BaseAPI):
         Returns:
             导出任务
         """
-        peer = {"chatType": chat_type, "peerUid": peer_uid}
+        peer = {"chatType": self._normalize_chat_type(chat_type), "peerUid": peer_uid}
         body: Dict[str, Any] = {
             "peer": peer,
-            "format": format.upper(),
+            "format": self._normalize_format(format),
         }
         if filter:
             body["filter"] = filter.to_dict()
@@ -322,6 +334,56 @@ class MessagesAPI(BaseAPI):
 
         data = self._request("POST", "/api/messages/export", json_data=body)
         return ExportTask.from_dict(data)
+
+    def quick_export(
+        self,
+        chat_type,  # int 或 ChatType
+        peer_uid: str,
+        format = "HTML",  # str 或 ExportFormat
+        days: Optional[int] = None,
+        filter: Optional[MessageFilter] = None,
+        options: Optional[ExportOptions] = None,
+        session_name: Optional[str] = None,
+        timeout: float = 600,
+        on_progress: Optional[Callable[[ExportTask], None]] = None,
+    ) -> ExportTask:
+        """
+        快速导出（创建任务并等待完成）
+
+        Args:
+            chat_type: 聊天类型 (ChatType.PRIVATE, ChatType.GROUP 或 1, 2)
+            peer_uid: 对方 UID 或群号
+            format: 导出格式 (ExportFormat.HTML 或 "HTML", "JSON", "TXT", "EXCEL")
+            days: 导出最近N天（与 filter 二选一）
+            filter: 消息筛选条件
+            options: 导出选项
+            session_name: 会话名称（可选）
+            timeout: 超时时间（秒）
+            on_progress: 进度回调函数
+
+        Returns:
+            完成的导出任务
+        """
+        # 如果指定了 days，创建筛选器
+        if days is not None and filter is None:
+            filter = MessageFilter.last_days(days)
+
+        # 创建导出任务
+        task = self.export(
+            chat_type=chat_type,
+            peer_uid=peer_uid,
+            format=format,
+            filter=filter,
+            options=options,
+            session_name=session_name,
+        )
+
+        # 等待完成
+        return self._client.tasks.wait_for_completion(
+            task.id,
+            timeout=timeout,
+            on_progress=on_progress,
+        )
 
 
 class TasksAPI(BaseAPI):
@@ -891,3 +953,175 @@ class NapCatQCE:
 
     def __repr__(self) -> str:
         return f"NapCatQCE(host={self.host!r}, port={self.port})"
+
+    # ========================================
+    # 便捷导出方法
+    # ========================================
+
+    def export_group(
+        self,
+        group_id: str,
+        format: str = "HTML",
+        days: Optional[int] = None,
+        filter: Optional[MessageFilter] = None,
+        session_name: Optional[str] = None,
+        timeout: float = 600,
+        on_progress: Optional[Callable[[ExportTask], None]] = None,
+    ) -> ExportTask:
+        """
+        快速导出群聊记录
+
+        Args:
+            group_id: 群号
+            format: 导出格式 ("HTML", "JSON", "TXT", "EXCEL")
+            days: 导出最近N天（与 filter 二选一）
+            filter: 消息筛选条件
+            session_name: 会话名称（默认使用群名）
+            timeout: 超时时间（秒）
+            on_progress: 进度回调函数
+
+        Returns:
+            完成的导出任务
+
+        Example:
+            # 导出最近7天
+            task = client.export_group("123456789", days=7)
+            print(f"导出了 {task.message_count} 条消息")
+        """
+        return self.messages.quick_export(
+            chat_type=ChatType.GROUP,
+            peer_uid=group_id,
+            format=format,
+            days=days,
+            filter=filter,
+            session_name=session_name,
+            timeout=timeout,
+            on_progress=on_progress,
+        )
+
+    def export_friend(
+        self,
+        friend_id: str,
+        format: str = "HTML",
+        days: Optional[int] = None,
+        filter: Optional[MessageFilter] = None,
+        session_name: Optional[str] = None,
+        timeout: float = 600,
+        on_progress: Optional[Callable[[ExportTask], None]] = None,
+    ) -> ExportTask:
+        """
+        快速导出私聊记录
+
+        Args:
+            friend_id: 好友QQ号
+            format: 导出格式 ("HTML", "JSON", "TXT", "EXCEL")
+            days: 导出最近N天（与 filter 二选一）
+            filter: 消息筛选条件
+            session_name: 会话名称（默认使用好友昵称）
+            timeout: 超时时间（秒）
+            on_progress: 进度回调函数
+
+        Returns:
+            完成的导出任务
+
+        Example:
+            # 导出最近30天
+            task = client.export_friend("111222333", days=30)
+            print(f"导出了 {task.message_count} 条消息")
+        """
+        return self.messages.quick_export(
+            chat_type=ChatType.PRIVATE,
+            peer_uid=friend_id,
+            format=format,
+            days=days,
+            filter=filter,
+            session_name=session_name,
+            timeout=timeout,
+            on_progress=on_progress,
+        )
+
+    def batch_export(
+        self,
+        targets: List[Dict[str, Any]],
+        format: str = "HTML",
+        days: Optional[int] = None,
+        on_progress: Optional[Callable[[str, ExportTask], None]] = None,
+        on_error: Optional[Callable[[str, Exception], None]] = None,
+    ) -> Dict[str, Any]:
+        """
+        批量导出多个聊天记录
+
+        Args:
+            targets: 导出目标列表，每项包含:
+                - type: "group" 或 "friend"
+                - id: 群号或好友QQ号
+                - name: 可选，会话名称
+            format: 导出格式
+            days: 导出最近N天
+            on_progress: 进度回调 (target_id, task)
+            on_error: 错误回调 (target_id, exception)
+
+        Returns:
+            结果统计: {"success": int, "failed": int, "total_messages": int, "results": [...]}
+
+        Example:
+            results = client.batch_export([
+                {"type": "group", "id": "123456789"},
+                {"type": "friend", "id": "111222333"},
+            ], days=7)
+            print(f"成功: {results['success']}, 失败: {results['failed']}")
+        """
+        results = {
+            "success": 0,
+            "failed": 0,
+            "total_messages": 0,
+            "results": [],
+        }
+
+        for target in targets:
+            target_type = target.get("type", "group")
+            target_id = target.get("id", "")
+            target_name = target.get("name")
+
+            try:
+                if target_type == "group":
+                    task = self.export_group(
+                        group_id=target_id,
+                        format=format,
+                        days=days,
+                        session_name=target_name,
+                    )
+                else:
+                    task = self.export_friend(
+                        friend_id=target_id,
+                        format=format,
+                        days=days,
+                        session_name=target_name,
+                    )
+
+                if on_progress:
+                    on_progress(target_id, task)
+
+                results["success"] += 1
+                results["total_messages"] += task.message_count
+                results["results"].append({
+                    "id": target_id,
+                    "type": target_type,
+                    "status": "success",
+                    "message_count": task.message_count,
+                    "file_name": task.file_name,
+                })
+
+            except Exception as e:
+                if on_error:
+                    on_error(target_id, e)
+
+                results["failed"] += 1
+                results["results"].append({
+                    "id": target_id,
+                    "type": target_type,
+                    "status": "failed",
+                    "error": str(e),
+                })
+
+        return results

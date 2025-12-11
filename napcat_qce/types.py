@@ -458,7 +458,22 @@ class SystemInfo:
 
 @dataclass
 class MessageFilter:
-    """消息筛选条件"""
+    """消息筛选条件
+
+    支持多种时间指定方式：
+    - days: 最近N天
+    - start_time/end_time: Unix时间戳（毫秒）或 datetime 对象
+
+    Example:
+        # 最近7天
+        filter = MessageFilter.last_days(7)
+
+        # 使用 datetime
+        filter = MessageFilter(
+            start_time=datetime(2024, 1, 1),
+            end_time=datetime(2024, 1, 31)
+        )
+    """
     start_time: Optional[int] = None  # Unix时间戳（毫秒）
     end_time: Optional[int] = None    # Unix时间戳（毫秒）
     sender_uids: Optional[List[str]] = None
@@ -466,6 +481,37 @@ class MessageFilter:
     include_recalled: bool = False
     include_system: bool = True
     filter_pure_image_messages: bool = False
+
+    def __post_init__(self):
+        """处理 datetime 对象转换"""
+        if isinstance(self.start_time, datetime):
+            self.start_time = int(self.start_time.timestamp() * 1000)
+        if isinstance(self.end_time, datetime):
+            self.end_time = int(self.end_time.timestamp() * 1000)
+
+    @classmethod
+    def last_days(cls, days: int, **kwargs) -> "MessageFilter":
+        """创建最近N天的筛选器"""
+        from datetime import timedelta
+        end = datetime.now()
+        start = end - timedelta(days=days)
+        return cls(
+            start_time=int(start.timestamp() * 1000),
+            end_time=int(end.timestamp() * 1000),
+            **kwargs
+        )
+
+    @classmethod
+    def last_hours(cls, hours: int, **kwargs) -> "MessageFilter":
+        """创建最近N小时的筛选器"""
+        from datetime import timedelta
+        end = datetime.now()
+        start = end - timedelta(hours=hours)
+        return cls(
+            start_time=int(start.timestamp() * 1000),
+            end_time=int(end.timestamp() * 1000),
+            **kwargs
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         result = {}
