@@ -1013,7 +1013,7 @@ class NapCatQCE:
         快速导出私聊记录
 
         Args:
-            friend_id: 好友QQ号
+            friend_id: 好友QQ号（uin）或好友UID
             format: 导出格式 ("HTML", "JSON", "TXT", "EXCEL")
             days: 导出最近N天（与 filter 二选一）
             filter: 消息筛选条件
@@ -1029,9 +1029,22 @@ class NapCatQCE:
             task = client.export_friend("111222333", days=30)
             print(f"导出了 {task.message_count} 条消息")
         """
+        # 私聊需要使用 uid（内部标识符），而不是 uin（QQ号）
+        # 如果传入的是 QQ 号，需要先转换为 uid
+        peer_uid = friend_id
+
+        # 检查是否已经是 uid 格式（通常以 "u_" 开头）
+        if not friend_id.startswith("u_"):
+            # 传入的是 QQ 号，需要查找对应的 uid
+            friends = self.friends.get_all()
+            for friend in friends:
+                if friend.uin == friend_id:
+                    peer_uid = friend.uid
+                    break
+
         return self.messages.quick_export(
             chat_type=ChatType.PRIVATE,
-            peer_uid=friend_id,
+            peer_uid=peer_uid,
             format=format,
             days=days,
             filter=filter,
